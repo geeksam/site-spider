@@ -31,4 +31,4 @@ opts['--host'] ||= 'localhost:3000'
 
 
 ##### Launch the spider
-SiteSpider::Spider.go!(opts)
+SiteSpider.go!(opts)

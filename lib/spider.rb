@@ -2,25 +2,15 @@ require File.join(File.dirname(__FILE__), *%w[dependencies])
 
 module SiteSpider
 
-  class PageInfo
-    attr_accessor :link, :referer, :page, :response_code, :time
-    def initialize
-      self.response_code = 200  # assume OK by default
-    end
-
-    def body_size
-      (page && page.body && page.body.size) || 0
-    end
+  def go!(options = {});
+    Spider.new(options).go!
   end
+  module_function :go!
+
+
 
   class Spider
     include SiteSpider::Helpers
-
-    class << self
-      def go!(options = {});
-        Spider.new(options).go!
-      end
-    end
 
     attr_accessor :site, :controller, :verboten_paths
     attr_accessor :login_target, :login_field, :login, :password_field, :password
