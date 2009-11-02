@@ -45,12 +45,9 @@ module SiteSpider
     end
 
     def go!
-      page = log_in!
-      self.links += controller  ? [ [ "/" + controller, ""] ] \
-                                : get_unvisited_links(get_links(page, site, verboten_paths), visited_links, limit_url_types) \
-                                  .map { |href| [href, "(login)"] }
-
       total_time = Benchmark.measure do
+        log_in_and_seed_links!
+
         while links.length > 0
           page_info = get_next_page!  # this should eventually be threaded
                                       # (note that there are some mutex points in here)
@@ -69,10 +66,22 @@ module SiteSpider
     end
 
     protected
-    def log_in!
-      page = agent.post( 'http://' + site + login_target, { login_field => login, password_field => password })
+    def log_in_and_seed_links!
+      # First, log in
+      page_info = PageInfo.new
+      page_info.referer = '[LOGIN PAGE]'
+      page_info.link = 'http://' + site + login_target
+      page_info.time = Benchmark.measure do
+        page_info.page = agent.post(page_info.link, { login_field => login, password_field => password })
+      end
+
+      # Then, seed links
+      self.links << ["/" + controller, ""] if controller
+      parse_page_for_links!(page_info)
+
+      # Last, print some summary data
       puts "Logged in "
-      page
+      print_page_summary(page_info)
     end
 
     def get_next_page!
