@@ -92,9 +92,6 @@ module SiteSpider
 
       page_info.time = Benchmark.measure do
         begin
-          ### Mutex the STDOUT business, or consider skipping it entirely...
-          STDOUT.write "Fetching #{ page_info.link }\r"
-          STDOUT.flush
           page_info.page = agent.get(page_info.link)
         rescue WWW::Mechanize::ResponseCodeError
           page_info.response_code = $!.response_code
