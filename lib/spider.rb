@@ -128,9 +128,9 @@ module SiteSpider
       end
       title.gsub!(/\s+/, ' ')
 
-      puts "[%4d %6d %3d %4.1fs] %-40s | %-70s %s" % [
+      puts "[%4d %6dK %3d %4.1fs] %-40s | %-70s %s" % [
         links.length,
-        page_info.body_size,
+        page_info.body_size / 1024,
         page_info.response_code,
         page_info.time.real,
         title,
