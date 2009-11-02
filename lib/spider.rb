@@ -51,7 +51,7 @@ module SiteSpider
                                   .map { |href| [href, "(login)"] }
 
       total_time = Benchmark.measure do
-        begin
+        while links.length > 0
           page_info = get_next_page!  # this should eventually be threaded
                                       # (note that there are some mutex points in here)
 
@@ -62,8 +62,7 @@ module SiteSpider
           ### End critical section
 
           # break if num_pages_loaded >= 5  #temp
-
-        end while links.length > 0  #(end)
+        end
       end
 
       print_final_summary(total_time)
