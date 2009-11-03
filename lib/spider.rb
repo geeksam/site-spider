@@ -90,7 +90,7 @@ module SiteSpider
             ## Without the following line, we'll create new threads as fast as this while loop can execute.
             ## Doing so sucks up memory like nobody's business, and makes interrupts (e.g., ^C) take forever
             ## as all of those threads wake up and terminate.
-            next if @agents.empty?
+            next if @thread_pool.full?
 
 	          @thread_pool.dispatch do    ##### THREADED SECTION #####
               begin
@@ -107,7 +107,7 @@ module SiteSpider
 	        end
         rescue Interrupt => e
           keep_running = false
-          puts "Interrupt received!  Waiting on #{@thread_pool.size} thread(s) to return..."
+          puts "\nInterrupt received!  Waiting on #{@thread_pool.size} thread(s) to return..."
         end
 
         @thread_pool.shutdown

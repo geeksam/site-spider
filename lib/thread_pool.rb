@@ -1,6 +1,6 @@
 module SiteSpider
   
-  # From the Ruby Cookbook, with one change
+  # From the Ruby Cookbook, with one significant change to the logic and a convenience method or two
   class ThreadPool
     def initialize(max_size)
       @pool = []
@@ -11,6 +11,9 @@ module SiteSpider
 
     def size
       @pool.size
+    end
+    def full?
+      @pool.size >= @max_size
     end
 
     def dispatch(*args)    
