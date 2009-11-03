@@ -14,30 +14,51 @@ module SiteSpider
 
     attr_accessor :site, :controller, :verboten_paths
     attr_accessor :login_target, :login_field, :login, :password_field, :password
-    attr_accessor :agent, :links, :visited_links, :num_pages_loaded, :limit_url_types, :initial_url
+    attr_accessor :links, :visited_links, :num_pages_loaded, :total_page_load_time, :limit_url_types, :initial_url
     attr_accessor :failures, :long_requests
+    attr_accessor :max_concurrent_requests
 
     def initialize(options = {})
       # Set properties from command-line options
-      self.site            = options['--host'           ]
-      self.controller      = options['--controller'     ]
-      self.login           = options['--username'       ]
-      self.password        = options['--password'       ]
-      self.login_target    = options['--login-target'   ]
-      self.login_field     = options['--username-field' ]
-      self.password_field  = options['--password-field' ]
-      self.verboten_paths  = options['--verboten-paths' ]
-      self.limit_url_types = options['--limit-url-types'].to_i || 20
-      self.initial_url     = options['--initial-url'    ]
+      self.site                    = options['--host'                   ]
+      self.controller              = options['--controller'             ]
+      self.login                   = options['--username'               ]
+      self.password                = options['--password'               ]
+      self.login_target            = options['--login-target'           ]
+      self.login_field             = options['--username-field'         ]
+      self.password_field          = options['--password-field'         ]
+      self.initial_url             = options['--initial-url'            ]
+      self.verboten_paths          = options['--verboten-paths'         ]
+      self.limit_url_types         = options['--limit-url-types'        ]
+      self.max_concurrent_requests = options['--max-concurrent-requests']
 
-      self.agent = WWW::Mechanize.new
-      agent.read_timeout = 300
+      # Provide defaults for some of the optional settings
+      self.limit_url_types         = (self.limit_url_types         || 20).to_i
+      self.max_concurrent_requests = (self.max_concurrent_requests ||  1).to_i
 
-      self.links            = []
-      self.failures         = []
-      self.long_requests    = []
-      self.visited_links    = Hash.new(0)
-      self.num_pages_loaded = 0
+      # Thread management
+      @thread_pool   = ThreadPool.new(max_concurrent_requests)
+      @links_mutex   = Mutex.new
+      @summary_mutex = Mutex.new
+      @agents_mutex  = Mutex.new
+
+      # Set up some shared objects.
+      # Per the Mechanize mailing list, each thread should have its own agent.
+      # http://rubyforge.org/pipermail/mechanize-users/2009-September/000449.html
+      @agents = []
+      max_concurrent_requests.times do |i|
+        agent = WWW::Mechanize.new
+        agent.read_timeout = 300
+        @agents << agent
+      end
+      @keep_running = true
+
+      self.links                = []
+      self.failures             = []
+      self.long_requests        = []
+      self.visited_links        = Hash.new(0)
+      self.num_pages_loaded     = 0
+      self.total_page_load_time = 0.0
 
       if initial_url
         links << [initial_url, ""]
@@ -47,32 +68,69 @@ module SiteSpider
     def go!
       total_time = Benchmark.measure do
         log_in_and_seed_links!
+        @more_links = !links.empty?
 
-        while links.length > 0
-          page_info = get_next_page!  # this should eventually be threaded
-                                      # (note that there are some mutex points in here)
-
-          ### Critical section:  at puts time, we should display an accurate count of links remaining
-          ### Note that in order to really be accurate, the number of pending threads should be taken into account
-          parse_page_for_links!(page_info)
-          print_page_summary(page_info)
-          ### End critical section
-
-          # break if num_pages_loaded >= 5  #temp
+        begin
+          while @keep_running && @more_links
+	          @thread_pool.dispatch do    ##### THREADED SECTION #####
+              begin
+  	            agent = acquire_agent
+                if @keep_running && @more_links
+  		            page_info = get_next_page!(agent)
+  		            process_page_info(page_info) if page_info
+  	            end
+              ensure
+		            # release the agent
+		            @agents << agent
+              end
+	          end                         ##### END THREADED SECTION #####
+	        end
+        rescue Interrupt => e
+          @keep_running = false
+          puts "Interrupt received!  Waiting on #{@thread_pool.size} thread(s) to return..."
         end
       end
 
-      print_final_summary(total_time)
+      @thread_pool.shutdown
+      print_final_summary(total_time) if @keep_running
     end
 
     protected
+    def acquire_agent
+      agent = nil
+      while agent.nil?
+        @agents_mutex.synchronize { agent = @agents.shift }
+      end
+      agent
+    end
+
+    def process_page_info(page_info)
+      ### Critical section:  at puts time, we should display an accurate count of links remaining
+      ### Note that in order to really be accurate, the number of pending threads should be taken into account
+      @links_mutex.synchronize do
+        @summary_mutex.synchronize do
+          if page_info.time.real > 5
+            long_requests << page_info    ### MUTEX THIS
+          end
+          parse_page_for_links!(page_info)
+          @more_links = !links.empty?
+          self.num_pages_loaded     += 1
+          self.total_page_load_time += page_info.time.real
+          print_page_summary(page_info)
+        end
+      end
+
+    end
+
     def log_in_and_seed_links!
       # First, log in
       page_info = PageInfo.new
       page_info.referer = '[LOGIN PAGE]'
       page_info.link = 'http://' + site + login_target
       page_info.time = Benchmark.measure do
-        page_info.page = agent.post(page_info.link, { login_field => login, password_field => password })
+        @agents.each do |agent|
+          page_info.page = agent.post(page_info.link, { login_field => login, password_field => password })
+        end
       end
 
       # Then, seed links
@@ -84,11 +142,16 @@ module SiteSpider
       print_page_summary(page_info)
     end
 
-    def get_next_page!
-      page_info = PageInfo.new
+    def get_next_page!(agent)
+      link_data = nil  # get this out of scope of the synchronize block
+      @links_mutex.synchronize do
+        link_data = links.shift
+      end
+      return if link_data.nil?
 
-      link_data = links.shift   ### MUTEX THIS
-      page_info.link, page_info.referer = *(link_data)
+      page_info = PageInfo.new
+      page_info.link     = link_data.first
+      page_info.referer  = link_data.last
 
       page_info.time = Benchmark.measure do
         begin
@@ -102,16 +165,11 @@ module SiteSpider
         rescue WWW::Mechanize::UnsupportedSchemeError
           page_info.response_code = 0
           puts "Unsupported scheme: $!"
-        rescue
-          puts "Unknown error: #{ $! }"
+        rescue Exception => e
+          puts "Unknown error: #{ e.inspect }"
+          # puts e.backtrace
         end
       end
-
-      if page_info.time.real > 5
-        long_requests << page_info    ### MUTEX THIS
-      end
-
-      self.num_pages_loaded += 1   ### MUTEX THIS
 
       page_info
     end
@@ -128,8 +186,8 @@ module SiteSpider
       end
       title.gsub!(/\s+/, ' ')
 
-      puts "[%4d %6dK %3d %4.1fs] %-40s | %-70s %s" % [
-        links.length,
+      puts '[%4d %6dK %3d %4.1fs] %-40s | %-70s %s' % [
+        links.length,   # note that this is only approximate
         page_info.body_size / 1024,
         page_info.response_code,
         page_info.time.real,
@@ -159,12 +217,20 @@ module SiteSpider
     end
 
     def print_final_summary(total_time)
-      puts '-' * 75, "\nLoaded #{num_pages_loaded} pages in %.1f seconds." % total_time.real
+      puts "\n" + '-' * 75
+      puts "\nLoaded %d pages in ~%.0f seconds." % [
+        num_pages_loaded,
+        total_time.real,
+      ]
+      puts "Total page load time was ~%.0f seconds, split across %d threads." % [
+        total_page_load_time,
+        max_concurrent_requests,
+      ]
 
       unless failures.empty?
         puts "\nFailures: "
 
-        failures.each do |page_info|
+        failures.sort_by{ |e| [e.response_code, e.link] }.each do |page_info|
           puts "%d\t%s\tfrom: %s" % [page_info.response_code, page_info.link, page_info.referer]
         end
       end
@@ -173,13 +239,11 @@ module SiteSpider
         puts "\nLong-running requests (more than 5s): "
 
         # Reverse sort entries in long_requests by elapsed time
-        long_requests.sort.reverse.each do |page_info|
-          puts "%4.1fs  |  %s  |  %s" % [page_info.time.real, page_info.link, page_info.referer]
+        long_requests.sort_by { |e| e.time.real }.reverse.each do |page_info|
+          puts "%4.1fs  |  %-40s  |  %s" % [page_info.time.real, page_info.link, page_info.referer]
         end
       end
     end
   end
 
 end
-
-
