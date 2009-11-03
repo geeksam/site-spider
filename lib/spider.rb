@@ -72,6 +72,12 @@ module SiteSpider
 
         begin
           while @keep_running && @more_links
+            ## IMPORTANT NOTE:
+            ## Without the following line, we'll create new threads as fast as this while loop can execute.
+            ## Doing so sucks up memory like nobody's business, and makes interrupts (e.g., ^C) take forever
+            ## as all of those threads wake up and terminate.
+            next if @agents.empty?
+
 	          @thread_pool.dispatch do    ##### THREADED SECTION #####
               begin
   	            agent = acquire_agent
