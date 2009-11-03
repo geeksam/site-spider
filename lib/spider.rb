@@ -95,9 +95,10 @@ module SiteSpider
           @keep_running = false
           puts "Interrupt received!  Waiting on #{@thread_pool.size} thread(s) to return..."
         end
+
+        @thread_pool.shutdown
       end
 
-      @thread_pool.shutdown
       print_final_summary(total_time) if @keep_running
     end
 
@@ -111,21 +112,18 @@ module SiteSpider
     end
 
     def process_page_info(page_info)
-      ### Critical section:  at puts time, we should display an accurate count of links remaining
-      ### Note that in order to really be accurate, the number of pending threads should be taken into account
       @links_mutex.synchronize do
-        @summary_mutex.synchronize do
-          if page_info.time.real > 5
-            long_requests << page_info    ### MUTEX THIS
-          end
-          parse_page_for_links!(page_info)
-          @more_links = !links.empty?
-          self.num_pages_loaded     += 1
-          self.total_page_load_time += page_info.time.real
-          print_page_summary(page_info)
-        end
+        parse_page_for_links!(page_info)
+        @more_links = !links.empty?
       end
-
+      @summary_mutex.synchronize do
+        if page_info.time.real > 5
+          long_requests << page_info    ### MUTEX THIS
+        end
+        self.num_pages_loaded     += 1
+        self.total_page_load_time += page_info.time.real
+        print_page_summary(page_info)
+      end
     end
 
     def log_in_and_seed_links!
