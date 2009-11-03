@@ -12,6 +12,11 @@ module SiteSpider
   class Spider
     include SiteSpider::Helpers
 
+    Defaults = {
+      :limit_url_types         => 20,
+      :max_concurrent_requests => 1,
+    }
+
     attr_accessor :site, :controller, :verboten_paths
     attr_accessor :login_target, :login_field, :login, :password_field, :password
     attr_accessor :links, :visited_links, :num_pages_loaded, :total_page_load_time, :limit_url_types, :initial_url
@@ -19,7 +24,14 @@ module SiteSpider
     attr_accessor :max_concurrent_requests
 
     def initialize(options = {})
-      # Set properties from command-line options
+      initialize_process_options(options)
+      initialize_set_up_thread_management
+      initialize_create_an_agent_for_each_thread
+      initialize_set_up_summary_variables
+    end
+
+    protected
+    def initialize_process_options(options)
       self.site                    = options['--host'                   ]
       self.controller              = options['--controller'             ]
       self.login                   = options['--username'               ]
@@ -32,17 +44,16 @@ module SiteSpider
       self.limit_url_types         = options['--limit-url-types'        ]
       self.max_concurrent_requests = options['--max-concurrent-requests']
 
-      # Provide defaults for some of the optional settings
-      self.limit_url_types         = (self.limit_url_types         || 20).to_i
-      self.max_concurrent_requests = (self.max_concurrent_requests ||  1).to_i
-
-      # Thread management
+      self.limit_url_types         = (self.limit_url_types         || Defaults[:limit_url_types]        ).to_i
+      self.max_concurrent_requests = (self.max_concurrent_requests || Defaults[:max_concurrent_requests]).to_i
+    end
+    def initialize_set_up_thread_management
       @thread_pool   = ThreadPool.new(max_concurrent_requests)
       @links_mutex   = Mutex.new
       @summary_mutex = Mutex.new
       @agents_mutex  = Mutex.new
-
-      # Set up some shared objects.
+    end
+    def initialize_create_an_agent_for_each_thread
       # Per the Mechanize mailing list, each thread should have its own agent.
       # http://rubyforge.org/pipermail/mechanize-users/2009-September/000449.html
       @agents = []
@@ -51,27 +62,30 @@ module SiteSpider
         agent.read_timeout = 300
         @agents << agent
       end
-      @keep_running = true
-
+    end
+    def initialize_set_up_summary_variables
       self.links                = []
+      if initial_url
+        links << [initial_url, ""]
+      end
+
       self.failures             = []
       self.long_requests        = []
       self.visited_links        = Hash.new(0)
       self.num_pages_loaded     = 0
       self.total_page_load_time = 0.0
-
-      if initial_url
-        links << [initial_url, ""]
-      end
     end
+    public
 
     def go!
+      keep_running = true
+
       total_time = Benchmark.measure do
         log_in_and_seed_links!
         @more_links = !links.empty?
 
         begin
-          while @keep_running && @more_links
+          while keep_running && @more_links
             ## IMPORTANT NOTE:
             ## Without the following line, we'll create new threads as fast as this while loop can execute.
             ## Doing so sucks up memory like nobody's business, and makes interrupts (e.g., ^C) take forever
@@ -81,7 +95,7 @@ module SiteSpider
 	          @thread_pool.dispatch do    ##### THREADED SECTION #####
               begin
   	            agent = acquire_agent
-                if @keep_running && @more_links
+                if keep_running
   		            page_info = get_next_page!(agent)
   		            process_page_info(page_info) if page_info
   	            end
@@ -92,14 +106,14 @@ module SiteSpider
 	          end                         ##### END THREADED SECTION #####
 	        end
         rescue Interrupt => e
-          @keep_running = false
+          keep_running = false
           puts "Interrupt received!  Waiting on #{@thread_pool.size} thread(s) to return..."
         end
 
         @thread_pool.shutdown
       end
 
-      print_final_summary(total_time) if @keep_running
+      print_final_summary(total_time) if keep_running
     end
 
     protected
