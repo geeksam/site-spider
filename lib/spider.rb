@@ -144,7 +144,9 @@ module SiteSpider
       # First, log in
       page_info = PageInfo.new
       page_info.referer = '[LOGIN PAGE]'
-      page_info.link = 'http://' + site + login_target
+      login_target_url = 'http://%s%s' % [site, login_target]
+      puts "Logging in to #{login_target_url} for each of #{max_concurrent_requests} agent(s)"
+      page_info.link = login_target_url
       page_info.time = Benchmark.measure do
         @agents.each do |agent|
           page_info.page = agent.post(page_info.link, { login_field => login, password_field => password })
@@ -157,6 +159,7 @@ module SiteSpider
 
       # Last, print some summary data
       puts "Logged in "
+      print_summary_header
       print_page_summary(page_info)
     end
 
@@ -192,9 +195,30 @@ module SiteSpider
       page_info
     end
 
+    def print_summary_header
+      legend = <<-HEREDOC
+
+URLs = Number of URLs remaining in queue
+Size = Size of returned document in KB
+OK?  = HTTP response code
+Time = Elapsed time between page load and EOF
+
+HEREDOC
+
+      headers = '%4s %7s  %3s %6s  %-40s   %-70s   %s'
+      puts (legend + headers) % [
+        'URLs',
+        'Size',
+        'OK?',
+        'Time',
+        'Page Title',
+        'Page URL',
+        'Refer[r]er URL',
+      ]
+    end
     def print_page_summary(page_info)
       title = if page_info.page.nil?
-        "(FAIL, from: #{page_info.referer})"
+        "FAIL with #{page_info.response_code}"
       else
         if page_info.page.respond_to?(:title)
           (page_info.page.title || '')[0..39]
@@ -204,14 +228,14 @@ module SiteSpider
       end
       title.gsub!(/\s+/, ' ')
 
-      puts '[%4d %6dK %3d %4.1fs] %-40s | %-70s %s' % [
+      puts '[%4d %6dK %3d %5.1fs] %-40s | %-70s | from %s' % [
         links.length,   # note that this is only approximate
         page_info.body_size / 1024,
         page_info.response_code,
         page_info.time.real,
         title,
         page_info.link,
-        (page_info.referer || '').match(/\[GET\]/) ? "(GET)" : ""
+        page_info.referer,
       ]
     end
 
