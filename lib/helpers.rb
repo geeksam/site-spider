@@ -5,10 +5,10 @@ module SiteSpider
       checked_by_name = { }
       form.fields.shuffle.each do |field|
         case field
-        when WWW::Mechanize::Form::SelectList: field.value = field.options.shuffle.first
-        when WWW::Mechanize::Form::MultiSelectList: field.value = field.options.shuffle[0..(rand * field.options.length).to_i]
-        when WWW::Mechanize::Form::CheckBox: field.checked = !field.checked if rand < 0.25
-        when WWW::Mechanize::Form::RadioButton
+        when Mechanize::Form::SelectList: field.value = field.options.shuffle.first
+        when Mechanize::Form::MultiSelectList: field.value = field.options.shuffle[0..(rand * field.options.length).to_i]
+        when Mechanize::Form::CheckBox: field.checked = !field.checked if rand < 0.25
+        when Mechanize::Form::RadioButton
           if checked_by_name.has_key? field.name
             field.checked = false
             if checked_by_name[field_name] = false
@@ -19,8 +19,8 @@ module SiteSpider
             field.checked = !field.checked
             checked_by_name[field.name] = field.checked
           end
-        when WWW::Mechanize::Form::Button:
-        when WWW::Mechanize::Form::Field:
+        when Mechanize::Form::Button:
+        when Mechanize::Form::Field:
         end
       end
       action = ((form.action.nil? || form.action == '') ? link : form.action.to_s).gsub(/\?.*/, '')

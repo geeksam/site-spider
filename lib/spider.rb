@@ -58,7 +58,7 @@ module SiteSpider
       # http://rubyforge.org/pipermail/mechanize-users/2009-September/000449.html
       @agents = []
       max_concurrent_requests.times do |i|
-        agent = WWW::Mechanize.new
+        agent = Mechanize.new
         agent.read_timeout = 300
         @agents << agent
       end
@@ -174,13 +174,13 @@ module SiteSpider
       page_info.time = Benchmark.measure do
         begin
           page_info.page = agent.get(page_info.link)
-        rescue WWW::Mechanize::ResponseCodeError
+        rescue Mechanize::ResponseCodeError
           page_info.response_code = $!.response_code
           failures << page_info
         rescue Timeout::Error
           page_info.response_code = -1
           failures << page_info
-        rescue WWW::Mechanize::UnsupportedSchemeError
+        rescue Mechanize::UnsupportedSchemeError
           page_info.response_code = 0
           puts "Unsupported scheme: $!"
         rescue Exception => e
