@@ -13,7 +13,7 @@ module SiteSpider
     include SiteSpider::Helpers
 
     Defaults = {
-      :limit_url_types         => 20,
+      :limit_url_types         => 3,
       :max_concurrent_requests => 1,
     }
 
